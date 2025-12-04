@@ -59,6 +59,16 @@ def main():
     parser.add_argument('--debug', action='store_true',
                         help='Enable debug logging')
     
+    # External provider arguments
+    parser.add_argument('--external-provider', action='store_true',
+                        help='Use external API provider instead of local vLLM')
+    parser.add_argument('--api-base', type=str, default=None,
+                        help='Base URL for external API (e.g., http://localhost:8000/v1)')
+    parser.add_argument('--api-key', type=str, default=None,
+                        help='API key for external provider')
+    parser.add_argument('--model-name', type=str, default=None,
+                        help='Model name for external API')
+    
     args = parser.parse_args()
     
     # Set up logging
@@ -72,9 +82,31 @@ def main():
     if args.device_id:
         config['device_id'] = args.device_id
     
+    # External provider CLI overrides
+    if args.external_provider:
+        config['use_external_provider'] = True
+    if args.api_base:
+        if 'external_provider' not in config:
+            config['external_provider'] = {}
+        config['external_provider']['api_base'] = args.api_base
+    if args.api_key:
+        if 'external_provider' not in config:
+            config['external_provider'] = {}
+        config['external_provider']['api_key'] = args.api_key
+    if args.model_name:
+        if 'external_provider' not in config:
+            config['external_provider'] = {}
+        config['external_provider']['model_name'] = args.model_name
+    
     # Create and run the agent
     try:
         logging.info(f"Starting Phone Agent with task: {args.task}")
+        if config.get('use_external_provider'):
+            ext_cfg = config.get('external_provider', {})
+            logging.info(f"Using external provider: {ext_cfg.get('api_base', 'default')}")
+        else:
+            logging.info("Using local vLLM model")
+        
         agent = PhoneAgent(config)
         
         # Execute the task
