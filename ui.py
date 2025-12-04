@@ -52,7 +52,7 @@ def setup_logging():
     file_handler.setFormatter(formatter)
     root_logger.addHandler(file_handler)
 
-def execute_task(task, max_cycles=10):
+def execute_task(task, max_cycles=10, use_external_provider=False, api_base="", api_key="", model_name=""):
     """
     Runs in a background thread. Clears logs and sets is_running=True
     until done, then sets is_running=False.
@@ -63,8 +63,26 @@ def execute_task(task, max_cycles=10):
     is_running = True
     config = load_config()
 
+    # Apply external provider settings from UI
+    config['use_external_provider'] = use_external_provider
+    if use_external_provider:
+        # Get existing config or create new dict
+        ext_config = config.get('external_provider', {})
+        
+        # Apply values from UI with fallbacks to existing config values or defaults
+        ext_config['api_base'] = api_base if api_base else ext_config.get('api_base') or 'http://localhost:8000/v1'
+        ext_config['api_key'] = api_key if api_key else ext_config.get('api_key')
+        ext_config['model_name'] = model_name if model_name else ext_config.get('model_name') or 'Qwen/Qwen2.5-VL-3B-Instruct'
+        
+        config['external_provider'] = ext_config
+
     try:
         logging.info(f"Starting Phone Agent with task: '{task}'")
+        if config.get('use_external_provider'):
+            ext_cfg = config.get('external_provider', {})
+            logging.info(f"Using external provider: {ext_cfg.get('api_base', 'default')}")
+        else:
+            logging.info("Using local vLLM model")
         agent = PhoneAgent(config)
         
         # Monkey-patch parse_screen to capture screenshots
@@ -91,7 +109,7 @@ def execute_task(task, max_cycles=10):
     finally:
         is_running = False
 
-def start_task(task, max_cycles):
+def start_task(task, max_cycles, use_external_provider, api_base, api_key, model_name):
     """
     1) If already running, do nothing.
     2) Otherwise, start the background thread for the agent.
@@ -114,8 +132,8 @@ def start_task(task, max_cycles):
     except ValueError:
         max_cycles = 10
     
-    # Start the background thread
-    thread = Thread(target=execute_task, args=(task, max_cycles))
+    # Start the background thread with external provider settings
+    thread = Thread(target=execute_task, args=(task, max_cycles, use_external_provider, api_base, api_key, model_name))
     thread.daemon = True
     thread.start()
     
@@ -156,6 +174,12 @@ def create_ui():
     screenshot_dir = config.get('screenshot_dir', './screenshots')
     Path(screenshot_dir).mkdir(parents=True, exist_ok=True)
     
+    # Get external provider defaults from config
+    ext_config = config.get('external_provider', {})
+    default_api_base = ext_config.get('api_base', 'http://localhost:8000/v1')
+    default_model_name = ext_config.get('model_name', 'Qwen/Qwen2.5-VL-3B-Instruct')
+    default_use_external = config.get('use_external_provider', False)
+    
     with gr.Blocks(title="Phone Agent UI") as demo:
         gr.Markdown("# Phone Agent Control Panel")
         
@@ -167,6 +191,32 @@ def create_ui():
                     lines=2
                 )
                 max_cycles = gr.Textbox(label="Maximum cycles", value="10")
+                
+                # External Provider Settings
+                with gr.Accordion("External Provider Settings", open=False):
+                    use_external_provider = gr.Checkbox(
+                        label="Use External Provider",
+                        value=default_use_external,
+                        info="Enable to use an external API (vLLM server, LM Studio, Ollama, etc.)"
+                    )
+                    api_base = gr.Textbox(
+                        label="API Base URL",
+                        value=default_api_base,
+                        placeholder="http://localhost:8000/v1",
+                        info="Base URL for the OpenAI-compatible API"
+                    )
+                    api_key = gr.Textbox(
+                        label="API Key (optional)",
+                        value="",
+                        placeholder="Leave empty if not required",
+                        type="password"
+                    )
+                    model_name = gr.Textbox(
+                        label="Model Name",
+                        value=default_model_name,
+                        placeholder="Qwen/Qwen2.5-VL-3B-Instruct"
+                    )
+                
                 start_button = gr.Button("Start Task", variant="primary")
                 
             with gr.Column(scale=5):
@@ -185,7 +235,7 @@ def create_ui():
         # 1) Button to start the agent -> enable the timer
         start_button.click(
             fn=start_task,
-            inputs=[task_input, max_cycles],
+            inputs=[task_input, max_cycles, use_external_provider, api_base, api_key, model_name],
             outputs=[log_output, image_output, timer]
         )
         
@@ -213,6 +263,13 @@ def create_ui():
         2. Once started, the Timer becomes active and auto-refreshes every 5s.  
         3. The Timer auto-stops after the task is finished, so you won't get timeouts.  
         4. You can still click **Refresh Display** manually any time.
+        
+        **External Provider**  
+        To use an external API provider (vLLM server, LM Studio, Ollama, etc.):
+        1. Enable "Use External Provider" in the settings accordion.
+        2. Set the API Base URL to your server's endpoint.
+        3. Add an API key if required by your provider.
+        4. Specify the model name if different from the default.
         """)
         
     return demo
