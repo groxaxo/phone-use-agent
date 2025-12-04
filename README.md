@@ -176,6 +176,14 @@ The UI provides:
 - View of the phone's screen at screenshot intervals
 - Log output
 - Auto-refresh functionality
+- **External provider settings** - Configure and use external API providers directly from the UI
+
+To use an external provider from the UI:
+1. Expand the "External Provider Settings" accordion
+2. Enable "Use External Provider"
+3. Set the API Base URL to your server's endpoint (e.g., `http://localhost:8000/v1`)
+4. Add an API key if required by your provider
+5. Specify the model name if different from the default
 
 ## Configuration
 
