@@ -117,6 +117,52 @@ Update the values in `config.json` to match your device's resolution exactly. In
    python main.py --help
    ```
 
+### Using External Providers (vLLM Server, LM Studio, etc.)
+
+Instead of running the vision-language model locally, you can connect to external API providers that offer OpenAI-compatible endpoints. This is useful when:
+- You want to run the model on a separate GPU server
+- You're using cloud-hosted models
+- You have limited local GPU memory
+
+#### Supported Providers
+
+- **vLLM Server**: Start vLLM with `vllm serve Qwen/Qwen2.5-VL-3B-Instruct --api-key <your-key>`
+- **LM Studio**: Enable the local server in LM Studio settings
+- **Ollama**: Use the OpenAI-compatible endpoint at `http://localhost:11434/v1`
+- **Any OpenAI-compatible API**: Works with any provider that supports vision models
+
+#### Command Line Usage
+
+```bash
+# Using vLLM server running locally
+python main.py --task "Open Chrome" --external-provider --api-base http://localhost:8000/v1
+
+# Using LM Studio
+python main.py --task "Open Chrome" --external-provider --api-base http://localhost:1234/v1
+
+# With API key authentication
+python main.py --task "Open Chrome" --external-provider --api-base http://your-server:8000/v1 --api-key your-api-key
+
+# Specifying a different model name
+python main.py --task "Open Chrome" --external-provider --api-base http://localhost:8000/v1 --model-name my-model
+```
+
+#### Configuration File Usage
+
+You can also configure external providers in `config.json`:
+
+```json
+{
+  "use_external_provider": true,
+  "external_provider": {
+    "api_base": "http://localhost:8000/v1",
+    "api_key": null,
+    "model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
+    "timeout": 120
+  }
+}
+```
+
 ### Graphical User Interface
 
 A simple Gradio UI is provided to visualize the agent's progress:
@@ -136,6 +182,7 @@ The UI provides:
 Edit `config.json` to configure:
 - Device dimensions (must match your actual device)
 - Model selection (3B vs 7B)
+- External provider settings
 - OmniParser settings
 - General execution parameters
 
@@ -150,6 +197,14 @@ Edit `config.json` to configure:
   "qwen_model_path": "Qwen/Qwen2.5-VL-3B-Instruct",
   "use_gpu": true,
   "temperature": 0.1,
+
+  "use_external_provider": false,
+  "external_provider": {
+    "api_base": "http://localhost:8000/v1",
+    "api_key": null,
+    "model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
+    "timeout": 120
+  },
 
   "omniparser_config": {
     "use_paddleocr": true,

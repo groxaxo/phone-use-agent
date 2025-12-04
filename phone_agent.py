@@ -9,9 +9,6 @@ from datetime import datetime
 from pathlib import Path
 import ast
 
-# Import our Qwen VL integration
-from qwen_vl_agent import QwenVLAgent
-
 class PhoneAgent:
     """
     A phone agent that uses Qwen2.5-VL to analyze screenshots and control a physical 
@@ -34,12 +31,26 @@ class PhoneAgent:
             'max_retries': 3,
             'qwen_model_path': 'Qwen/Qwen2.5-VL-3B-Instruct',
             'use_gpu': True,
-            'temperature': 0.1
+            'temperature': 0.1,
+            # External provider configuration
+            'use_external_provider': False,  # Set to True to use external API
+            'external_provider': {
+                'api_base': 'http://localhost:8000/v1',  # vLLM, LM Studio, etc.
+                'api_key': None,  # Optional API key
+                'model_name': 'Qwen/Qwen2.5-VL-3B-Instruct',  # Model name for API
+                'timeout': 120  # Request timeout in seconds
+            }
         }
         
         self.config = default_config
         if config:
             self.config.update(config)
+            # Deep merge for external_provider
+            if 'external_provider' in config:
+                self.config['external_provider'] = {
+                    **default_config['external_provider'],
+                    **config['external_provider']
+                }
         
         self.context = {
             'previous_actions': [],
@@ -58,16 +69,44 @@ class PhoneAgent:
             ]
         )
 
-        # Initialize the Qwen VL model
-        logging.info("Initializing Qwen VL agent... may take a while")
-        self.vl_agent = QwenVLAgent(
-            model_path=self.config['qwen_model_path'],
-            use_gpu=self.config['use_gpu'],
-            temperature=self.config['temperature']
-        )
+        # Initialize the VL agent (local or external)
+        self._initialize_vl_agent()
         
         self._setup_directories()
         self._check_adb_connection()
+    
+    def _initialize_vl_agent(self):
+        """
+        Initialize the vision-language agent based on configuration.
+        
+        Uses external API provider if 'use_external_provider' is True,
+        otherwise uses local vLLM-based Qwen model.
+        """
+        if self.config.get('use_external_provider', False):
+            # Use external provider (vLLM server, LM Studio, etc.)
+            from external_vl_agent import ExternalVLAgent
+            
+            ext_config = self.config.get('external_provider', {})
+            logging.info(f"Initializing external VL agent with API: {ext_config.get('api_base')}")
+            
+            self.vl_agent = ExternalVLAgent(
+                api_base=ext_config.get('api_base', 'http://localhost:8000/v1'),
+                api_key=ext_config.get('api_key'),
+                model_name=ext_config.get('model_name', self.config['qwen_model_path']),
+                temperature=self.config['temperature'],
+                max_tokens=ext_config.get('max_tokens', 1024),
+                timeout=ext_config.get('timeout', 120)
+            )
+        else:
+            # Use local vLLM-based Qwen model
+            from qwen_vl_agent import QwenVLAgent
+            
+            logging.info("Initializing local Qwen VL agent... may take a while")
+            self.vl_agent = QwenVLAgent(
+                model_path=self.config['qwen_model_path'],
+                use_gpu=self.config['use_gpu'],
+                temperature=self.config['temperature']
+            )
     
     def _setup_directories(self):
         """Create necessary directories for storing screenshots."""
