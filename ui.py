@@ -63,17 +63,18 @@ def execute_task(task, max_cycles=10, use_external_provider=False, api_base="", 
     is_running = True
     config = load_config()
 
-    # Apply external provider settings if enabled
+    # Apply external provider settings from UI
+    config['use_external_provider'] = use_external_provider
     if use_external_provider:
-        config['use_external_provider'] = True
-        if 'external_provider' not in config:
-            config['external_provider'] = {}
-        if api_base:
-            config['external_provider']['api_base'] = api_base
-        if api_key:
-            config['external_provider']['api_key'] = api_key
-        if model_name:
-            config['external_provider']['model_name'] = model_name
+        # Get existing config or create new dict
+        ext_config = config.get('external_provider', {})
+        
+        # Apply values from UI with fallbacks to existing config values or defaults
+        ext_config['api_base'] = api_base if api_base else ext_config.get('api_base') or 'http://localhost:8000/v1'
+        ext_config['api_key'] = api_key if api_key else ext_config.get('api_key')
+        ext_config['model_name'] = model_name if model_name else ext_config.get('model_name') or 'Qwen/Qwen2.5-VL-3B-Instruct'
+        
+        config['external_provider'] = ext_config
 
     try:
         logging.info(f"Starting Phone Agent with task: '{task}'")
