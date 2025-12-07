@@ -17,8 +17,8 @@ The Phone Use Agent automates interactions with Android devices by:
 - Python 3.10
 - Linux operating system
 - Android Debug Bridge (ADB)
-- CUDA-capable GPU (Tested on 3xxx GPU with Cuda 12.4)
-- Connected Android device with USB debugging enabled
+- CUDA-capable GPU (Optimized for CUDA 12.4+, tested on 30xx/40xx GPUs)
+- Connected Android device with USB debugging enabled (Android 10-15 supported, optimized for Android 15)
 
 ## Installing ADB on Linux
 
@@ -191,6 +191,8 @@ Edit `config.json` to configure:
 - Device dimensions (must match your actual device)
 - Model selection (3B vs 7B)
 - External provider settings
+- **CUDA optimizations** (GPU memory utilization, precision, caching)
+- **Android version compatibility** (Android 10-15 support)
 - OmniParser settings
 - General execution parameters
 
@@ -214,14 +216,78 @@ Edit `config.json` to configure:
     "timeout": 120
   },
 
+  "cuda_config": {
+    "gpu_memory_utilization": 0.90,
+    "dtype": "bfloat16",
+    "enable_flash_attention": true,
+    "max_model_len": 32768,
+    "enforce_eager": false,
+    "enable_chunked_prefill": true,
+    "tensor_parallel_size": 1,
+    "enable_prefix_caching": true,
+    "disable_custom_all_reduce": false
+  },
+
+  "android_config": {
+    "min_android_version": 10,
+    "target_android_version": 15,
+    "enable_gesture_nav": true,
+    "screenshot_format": "png",
+    "use_scrcpy": false,
+    "adb_timeout": 30
+  },
+
   "omniparser_config": {
     "use_paddleocr": true,
     "box_threshold": 0.05,
     "iou_threshold": 0.1,
-    "imgsz": 640
+    "imgsz": 640,
+    "device": "cuda",
+    "half_precision": true,
+    "enable_xformers": false
   }
 }
 ```
+
+### CUDA Configuration Options
+
+The `cuda_config` section provides fine-grained control over GPU performance:
+
+- **`gpu_memory_utilization`** (0.0-1.0): Fraction of GPU memory to use (default: 0.90)
+  - Higher values allow larger context but may cause OOM errors
+  - Lower values (0.70-0.85) recommended for dual-GPU setups or limited VRAM
+- **`dtype`**: Model precision (default: "bfloat16")
+  - `bfloat16`: Best balance of speed and accuracy for Ampere+ GPUs (recommended)
+  - `float16`: Slightly faster but may have numerical stability issues
+  - `float32`: Highest precision but slowest and uses most memory
+- **`enable_flash_attention`**: Use Flash Attention 2 if available (default: true)
+  - Significantly faster and more memory efficient for long sequences
+  - Automatically enabled on compatible GPUs (Ampere/Ada/Hopper)
+- **`enable_chunked_prefill`**: Process long prompts in chunks (default: true)
+  - Reduces memory spikes during prefill phase
+- **`enable_prefix_caching`**: Cache common prompt prefixes (default: true)
+  - Speeds up repeated queries with similar prompts
+- **`tensor_parallel_size`**: Number of GPUs for tensor parallelism (default: 1)
+  - Set to 2 or more for multi-GPU inference
+  - Requires multiple CUDA-capable GPUs
+
+### Android Configuration Options
+
+The `android_config` section provides Android version-specific optimizations:
+
+- **`target_android_version`**: Target Android API level (default: 15)
+  - Enables version-specific optimizations and features
+- **`enable_gesture_nav`**: Support for gesture navigation (default: true)
+  - Optimized for Android 10+ gesture navigation
+- **`screenshot_format`**: Format for screenshots (default: "png")
+  - "png": Lossless, larger files
+  - "jpg": Lossy compression, smaller files (future support)
+- **`adb_timeout`**: Timeout for ADB commands in seconds (default: 30)
+
+**Android 15 Specific Optimizations:**
+- Faster screenshot capture using `exec-out` streaming (no intermediate file)
+- Automatic version detection and adaptive behavior
+- Optimized for predictive back gestures and new permission models
 
 ## How It Works
 
@@ -249,7 +315,61 @@ The Main Controller manages execution cycles, tracks context between actions, ha
 - **ADB connection issues**: Make sure USB debugging is enabled and you've authorized the computer on your device
 - **OmniParser errors**: Check that all model weights are correctly downloaded and placed in the proper directories
 - **Gradio errors**: If using the UI, make sure you have gradio installed (`pip install gradio`)
-- **OOM Errors from vLLM**: The Qwen2.5VL 3B and 7B models can take up a lot of memory. If you have a dual GPU setup, it is possible to set Omniparser to run on the second GPU to allow for more memory to run the model on the first GPU by uncommenting `# os.environ["CUDA_VISIBLE_DEVICES"] = "1"` on line 21 of omniparser_runner.py 
+- **OOM Errors from vLLM**: The Qwen2.5VL 3B and 7B models can take up a lot of memory. Solutions:
+  - Reduce `gpu_memory_utilization` in `cuda_config` (try 0.70-0.85)
+  - Use the 3B model instead of 7B: `"qwen_model_path": "Qwen/Qwen2.5-VL-3B-Instruct"`
+  - For dual GPU setups: Uncomment `# os.environ["CUDA_VISIBLE_DEVICES"] = "1"` on line 21 of omniparser_runner.py to run OmniParser on GPU 1
+  - Enable external provider mode to run the model on a separate server
+- **Slow inference**: 
+  - Ensure `enable_flash_attention` is `true` in `cuda_config`
+  - Enable `enable_prefix_caching` for repeated queries
+  - Verify GPU drivers are up to date
+  - Check that CUDA 12.4+ is properly installed
+- **Android 15 compatibility issues**:
+  - The agent automatically detects Android version and applies optimizations
+  - If screenshot capture fails, the agent falls back to traditional method automatically
+  - Check ADB version is up to date: `adb version` (recommended: 34.0.0+) 
+
+## Performance Optimization Tips
+
+### For CUDA GPUs
+
+1. **GPU Memory Optimization**:
+   - Single GPU (24GB): Use default `gpu_memory_utilization: 0.90`
+   - Dual GPU setup: Run vLLM on GPU 0 and OmniParser on GPU 1
+   - Lower VRAM (16GB or less): Reduce to `0.70-0.80` or use external provider
+
+2. **Inference Speed**:
+   - Flash Attention 2 provides 2-3x speedup on Ampere+ GPUs (RTX 30xx/40xx)
+   - Enable prefix caching for repeated prompts (10-20% faster)
+   - Use chunked prefill to reduce memory spikes
+   - Consider bfloat16 over float32 for 2x speed improvement
+
+3. **Multi-GPU Setup**:
+   - Set `tensor_parallel_size` to split model across multiple GPUs
+   - Example: For 2x RTX 3090, set `"tensor_parallel_size": 2`
+
+4. **TF32 Acceleration**:
+   - Automatically enabled on Ampere+ GPUs for matmul operations
+   - Provides up to 8x speedup with minimal accuracy impact
+
+### For Android Devices
+
+1. **Android 15 Optimizations**:
+   - Faster screenshot capture using streaming (no temp files)
+   - Automatic version detection and adaptive behavior
+   - Reduced latency for all ADB operations
+
+2. **General Tips**:
+   - Keep device screen on during operation for consistent timing
+   - Disable battery optimization for ADB to prevent connection drops
+   - Use USB 3.0 ports for faster screenshot transfer
+   - Clear device cache regularly if storage is limited
+
+3. **Network Performance** (for external providers):
+   - Run vLLM server on same machine or low-latency network
+   - Use wired ethernet instead of WiFi when possible
+   - Increase timeout for slow connections: `"timeout": 180`
 
 ## Experimental Status
 
