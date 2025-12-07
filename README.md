@@ -58,7 +58,13 @@ adb version
    pip install -r requirements.txt
    ```
 
-5. Download OmniParser weights:
+5. **Verify your setup** (recommended):
+   ```bash
+   python check_setup.py
+   ```
+   This script validates your CUDA, ADB, and OmniParser setup and provides optimization recommendations.
+
+6. Download OmniParser weights:
    ```bash
    cd OmniParser
 
@@ -74,10 +80,16 @@ adb version
    mv weights/icon_caption weights/icon_caption_florence
    ```
 
-6. Return to main directory:
+7. Return to main directory:
    ```bash
    cd ..
    ```
+
+8. **Verify installation** (optional but recommended):
+   ```bash
+   python check_setup.py
+   ```
+   This validates your setup and checks for optimal CUDA and Android configurations.
 
 ## Device Configuration
 
@@ -249,6 +261,29 @@ Edit `config.json` to configure:
 }
 ```
 
+### Pre-configured Examples
+
+The repository includes example configurations for different hardware setups:
+
+1. **`config.json`** (Default - Balanced)
+   - GPU memory: 90% utilization
+   - Best for 24GB VRAM GPUs (RTX 3090, 4090, A5000)
+   
+2. **`config.high-performance.json`**
+   - GPU memory: 95% utilization
+   - Max context length: 32K tokens
+   - For high-end GPUs with 40GB+ VRAM (A100, H100)
+   
+3. **`config.low-memory.json`**
+   - GPU memory: 70% utilization
+   - Reduced context: 16K tokens
+   - For GPUs with 12-16GB VRAM (RTX 3060, RTX 4060)
+
+To use an example config:
+```bash
+python main.py --config config.high-performance.json --task "Your task"
+```
+
 ### CUDA Configuration Options
 
 The `cuda_config` section provides fine-grained control over GPU performance:
@@ -329,6 +364,43 @@ The Main Controller manages execution cycles, tracks context between actions, ha
   - The agent automatically detects Android version and applies optimizations
   - If screenshot capture fails, the agent falls back to traditional method automatically
   - Check ADB version is up to date: `adb version` (recommended: 34.0.0+) 
+
+## Benchmarking and Performance Testing
+
+To measure and optimize performance, use the included benchmark script:
+
+```bash
+# Run a simple benchmark with default config
+python benchmark.py
+
+# Run benchmark with custom task
+python benchmark.py --task "Open Settings" --cycles 5
+
+# Compare two different configurations
+python benchmark.py --config config1.json --compare config2.json
+```
+
+The benchmark measures:
+- Model initialization time
+- Task execution time
+- Average time per cycle
+- GPU memory usage before and after
+
+Results are saved to `benchmark_YYYYMMDD_HHMMSS.json` for later analysis.
+
+### Example: Testing CUDA Optimizations
+
+```bash
+# Test with high GPU memory utilization
+# Edit config.json: "gpu_memory_utilization": 0.90
+python benchmark.py --task "Open Chrome" --cycles 3
+
+# Test with conservative memory usage
+# Edit config.json: "gpu_memory_utilization": 0.70
+python benchmark.py --task "Open Chrome" --cycles 3
+
+# Compare results to find optimal settings for your GPU
+```
 
 ## Performance Optimization Tips
 

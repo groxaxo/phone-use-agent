@@ -1,0 +1,50 @@
+{
+  "device_id": null,
+  "screen_width": 1080,
+  "screen_height": 2340,
+  "omniparser_path": "./OmniParser",
+  "screenshot_dir": "./screenshots",
+  "max_retries": 3,
+  "qwen_model_path": "Qwen/Qwen2.5-VL-3B-Instruct",
+  "use_gpu": true,
+  "temperature": 0.1,
+
+  "use_external_provider": false,
+  "external_provider": {
+    "api_base": "http://localhost:8000/v1",
+    "api_key": null,
+    "model_name": "Qwen/Qwen2.5-VL-3B-Instruct",
+    "timeout": 120
+  },
+
+  "cuda_config": {
+    "gpu_memory_utilization": 0.95,
+    "dtype": "bfloat16",
+    "enable_flash_attention": true,
+    "max_model_len": 32768,
+    "enforce_eager": false,
+    "enable_chunked_prefill": true,
+    "tensor_parallel_size": 1,
+    "enable_prefix_caching": true,
+    "disable_custom_all_reduce": false
+  },
+
+  "android_config": {
+    "min_android_version": 10,
+    "target_android_version": 15,
+    "enable_gesture_nav": true,
+    "screenshot_format": "png",
+    "use_scrcpy": false,
+    "adb_timeout": 30
+  },
+
+  "omniparser_config": {
+    "use_paddleocr": true,
+    "box_threshold": 0.05,
+    "iou_threshold": 0.1,
+    "imgsz": 640,
+    "device": "cuda",
+    "half_precision": true,
+    "enable_xformers": false
+  }
+}

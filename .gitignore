@@ -172,3 +172,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Phone Agent specific
+screenshots/
+*.log
+benchmark_*.json
+OmniParser/
