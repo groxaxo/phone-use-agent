@@ -117,7 +117,8 @@ def process_image(image_path, box_threshold, iou_threshold, use_paddleocr, imgsz
         
         # Run OCR with optimizations
         print("Running OCR...")
-        with torch.inference_mode() if hasattr(torch, 'inference_mode') else torch.no_grad():
+        # Use inference_mode for better performance (requires PyTorch 1.9+)
+        with torch.inference_mode():
             ocr_bbox_rslt, _ = check_ocr_box(
                 image_input, 
                 display_img=False, 

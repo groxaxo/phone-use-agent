@@ -618,8 +618,12 @@ class PhoneAgent:
             if not screenshot_dir.exists():
                 return
             
-            # Get all screenshots for this session
-            pattern = f"screen_{self.context['session_id']}_*.png"
+            # Get screenshot format from config
+            android_config = self.config.get('android_config', {})
+            screenshot_format = android_config.get('screenshot_format', 'png')
+            
+            # Get all screenshots for this session with the configured format
+            pattern = f"screen_{self.context['session_id']}_*.{screenshot_format}"
             screenshots = sorted(screenshot_dir.glob(pattern))
             
             # Delete older screenshots if we have more than keep_last
@@ -627,7 +631,7 @@ class PhoneAgent:
                 for screenshot in screenshots[:-keep_last]:
                     screenshot.unlink()
                     # Also delete annotated versions
-                    annotated = screenshot.with_name(screenshot.stem + "_annotated.png")
+                    annotated = screenshot.with_name(screenshot.stem + f"_annotated.{screenshot_format}")
                     if annotated.exists():
                         annotated.unlink()
                 logging.debug(f"Cleaned up {len(screenshots) - keep_last} old screenshots")

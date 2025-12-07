@@ -65,11 +65,8 @@ class QwenVLAgent:
                 
                 # Enable Flash Attention if available and requested
                 if default_cuda_config.get("enable_flash_attention", True):
-                    try:
-                        # Flash Attention is automatically enabled in vLLM when available
-                        logging.info("Flash Attention will be used if available")
-                    except Exception as e:
-                        logging.warning(f"Flash Attention not available: {e}")
+                    # Flash Attention is automatically enabled in vLLM when available
+                    logging.info("Flash Attention will be used if available")
                 
                 # Clear CUDA cache before loading model
                 torch.cuda.empty_cache()
