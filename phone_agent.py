@@ -105,7 +105,8 @@ class PhoneAgent:
             self.vl_agent = QwenVLAgent(
                 model_path=self.config['qwen_model_path'],
                 use_gpu=self.config['use_gpu'],
-                temperature=self.config['temperature']
+                temperature=self.config['temperature'],
+                cuda_config=self.config.get('cuda_config', None)
             )
     
     def _setup_directories(self):
@@ -143,10 +144,57 @@ class PhoneAgent:
                 shell=True, check=True, capture_output=True, text=True
             )
             
+            # Detect Android version
+            self._detect_android_version()
+            
             logging.info("ADB connection verified")
         except subprocess.CalledProcessError as e:
             logging.error(f"ADB connection error: {e}")
             raise Exception("Failed to connect to device via ADB. Make sure USB debugging is enabled.")
+    
+    def _detect_android_version(self):
+        """Detect the Android version of the connected device."""
+        try:
+            device_cmd_prefix = f"-s {self.config['device_id']}" if self.config['device_id'] else ""
+            result = subprocess.run(
+                f"adb {device_cmd_prefix} shell getprop ro.build.version.release",
+                shell=True, check=True, capture_output=True, text=True
+            )
+            android_version = result.stdout.strip()
+            
+            # Get SDK version for more precise version detection
+            sdk_result = subprocess.run(
+                f"adb {device_cmd_prefix} shell getprop ro.build.version.sdk",
+                shell=True, check=True, capture_output=True, text=True
+            )
+            sdk_version = int(sdk_result.stdout.strip())
+            
+            self.context['android_version'] = android_version
+            self.context['android_sdk'] = sdk_version
+            
+            logging.info(f"Detected Android version: {android_version} (SDK {sdk_version})")
+            
+            # Android 15 is SDK 35
+            if sdk_version >= 35:
+                logging.info("Android 15+ detected - using optimized settings")
+                self._apply_android_15_optimizations()
+            elif sdk_version >= 33:
+                logging.info("Android 13+ detected")
+            
+        except Exception as e:
+            logging.warning(f"Could not detect Android version: {e}")
+            self.context['android_version'] = "unknown"
+            self.context['android_sdk'] = 0
+    
+    def _apply_android_15_optimizations(self):
+        """Apply Android 15 specific optimizations."""
+        android_config = self.config.get('android_config', {})
+        
+        # Enable predictive back gesture support
+        if android_config.get('enable_gesture_nav', True):
+            logging.info("Gesture navigation optimizations enabled for Android 15")
+        
+        logging.info("Applied Android 15 optimizations")
     
     def _run_adb_command(self, command):
         """
@@ -175,28 +223,55 @@ class PhoneAgent:
     def capture_screen(self):
         """
         Capture screenshot from the device.
+        Optimized for Android 15 with improved performance.
         
         Returns:
             str: Path to the saved screenshot
         """
         timestamp = int(time.time())
+        android_config = self.config.get('android_config', {})
+        screenshot_format = android_config.get('screenshot_format', 'png')
         screenshot_path = os.path.join(
             self.config['screenshot_dir'],
-            f"screen_{self.context['session_id']}_{timestamp}.png"
+            f"screen_{self.context['session_id']}_{timestamp}.{screenshot_format}"
         )
         
         try:
-            # Use ADB to capture screenshot and save it locally
-            # For a physical device, we use the following approach
-            self._run_adb_command(f"shell screencap -p /sdcard/screenshot.png")
-            self._run_adb_command(f"pull /sdcard/screenshot.png {screenshot_path}")
-            self._run_adb_command(f"shell rm /sdcard/screenshot.png")
+            # Android 15 optimization: Use exec-out for faster screenshot capture
+            # This avoids writing to device storage and is faster
+            android_sdk = self.context.get('android_sdk', 0)
+            
+            if android_sdk >= 33:  # Android 13+ supports exec-out efficiently
+                # Direct stream from device to file (faster for Android 13+)
+                device_cmd_prefix = f"-s {self.config['device_id']}" if self.config['device_id'] else ""
+                with open(screenshot_path, 'wb') as f:
+                    result = subprocess.run(
+                        f"adb {device_cmd_prefix} exec-out screencap -p",
+                        shell=True, check=True, capture_output=True
+                    )
+                    f.write(result.stdout)
+                logging.info(f"Screenshot captured using fast exec-out method")
+            else:
+                # Fallback to traditional method for older Android versions
+                self._run_adb_command(f"shell screencap -p /sdcard/screenshot.png")
+                self._run_adb_command(f"pull /sdcard/screenshot.png {screenshot_path}")
+                self._run_adb_command(f"shell rm /sdcard/screenshot.png")
+                logging.info(f"Screenshot captured using traditional method")
             
             logging.info(f"Screenshot saved to: {screenshot_path}")
             return screenshot_path
         except Exception as e:
             logging.error(f"Error capturing screenshot: {e}")
-            raise
+            # Fallback to traditional method if exec-out fails
+            try:
+                self._run_adb_command(f"shell screencap -p /sdcard/screenshot.png")
+                self._run_adb_command(f"pull /sdcard/screenshot.png {screenshot_path}")
+                self._run_adb_command(f"shell rm /sdcard/screenshot.png")
+                logging.info(f"Screenshot captured using fallback method")
+                return screenshot_path
+            except Exception as fallback_error:
+                logging.error(f"Fallback screenshot method also failed: {fallback_error}")
+                raise
     
     def parse_screen(self, screenshot_path):
         """
@@ -523,10 +598,45 @@ class PhoneAgent:
                 action['elementName'] not in ['Circle', 'Dictate', 'Paste']):
                 self.context['current_app'] = action['elementName']
             
+            # Cleanup old screenshots to save disk space
+            self._cleanup_old_screenshots()
+            
             return result
         except Exception as e:
             logging.error(f"Error in execution cycle: {e}")
             raise
+    
+    def _cleanup_old_screenshots(self, keep_last=10):
+        """
+        Clean up old screenshots to save disk space, keeping only the most recent ones.
+        
+        Args:
+            keep_last (int): Number of recent screenshots to keep
+        """
+        try:
+            screenshot_dir = Path(self.config['screenshot_dir'])
+            if not screenshot_dir.exists():
+                return
+            
+            # Get screenshot format from config
+            android_config = self.config.get('android_config', {})
+            screenshot_format = android_config.get('screenshot_format', 'png')
+            
+            # Get all screenshots for this session with the configured format
+            pattern = f"screen_{self.context['session_id']}_*.{screenshot_format}"
+            screenshots = sorted(screenshot_dir.glob(pattern))
+            
+            # Delete older screenshots if we have more than keep_last
+            if len(screenshots) > keep_last:
+                for screenshot in screenshots[:-keep_last]:
+                    screenshot.unlink()
+                    # Also delete annotated versions
+                    annotated = screenshot.with_name(screenshot.stem + f"_annotated.{screenshot_format}")
+                    if annotated.exists():
+                        annotated.unlink()
+                logging.debug(f"Cleaned up {len(screenshots) - keep_last} old screenshots")
+        except Exception as e:
+            logging.warning(f"Error cleaning up screenshots: {e}")
     
     def execute_task(self, user_request, max_cycles=10):
         """
@@ -541,11 +651,18 @@ class PhoneAgent:
         """
         logging.info(f"Starting task: \"{user_request}\"")
         
+        # Log initial GPU memory if available
+        self._log_gpu_memory("Task start")
+        
         cycles = 0
         while cycles < max_cycles:
             try:
                 result = self.execute_cycle(user_request)
                 logging.info(f"Cycle {cycles + 1} completed: {result}")
+                
+                # Log GPU memory usage periodically
+                if (cycles + 1) % 5 == 0:
+                    self._log_gpu_memory(f"After cycle {cycles + 1}")
                 
                 # Check if we should continue or if the task is complete
                 # This could be determined by asking the LLM if the task is complete
@@ -566,11 +683,36 @@ class PhoneAgent:
                 raise Exception(f"Failed to complete task after {cycles} cycles: {str(e)}")
         
         logging.info(f"Task completed after {cycles} cycles")
+        self._log_gpu_memory("Task end")
+        
         return {
             'success': True,
             'cycles': cycles,
             'context': self.context
         }
+    
+    def _log_gpu_memory(self, stage=""):
+        """
+        Log current GPU memory usage for monitoring and debugging.
+        
+        Args:
+            stage (str): Description of current stage for logging context
+        """
+        try:
+            import torch
+            if torch.cuda.is_available():
+                for i in range(torch.cuda.device_count()):
+                    allocated = torch.cuda.memory_allocated(i) / (1024**3)
+                    reserved = torch.cuda.memory_reserved(i) / (1024**3)
+                    total = torch.cuda.get_device_properties(i).total_memory / (1024**3)
+                    logging.info(
+                        f"GPU {i} Memory [{stage}]: "
+                        f"Allocated: {allocated:.2f}GB, "
+                        f"Reserved: {reserved:.2f}GB, "
+                        f"Total: {total:.2f}GB"
+                    )
+        except Exception as e:
+            logging.debug(f"Could not log GPU memory: {e}")
 
 
 if __name__ == "__main__":

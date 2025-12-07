@@ -14,7 +14,7 @@ class QwenVLAgent:
     This class handles the processing of screenshots and generation of actions.
     """
     
-    def __init__(self, model_path, use_gpu=True, temperature=0.1):
+    def __init__(self, model_path, use_gpu=True, temperature=0.1, cuda_config=None):
         """
         Initialize the Qwen VL model with vLLM for optimal performance.
         
@@ -22,27 +22,69 @@ class QwenVLAgent:
             model_path (str): Path to the Qwen model
             use_gpu (bool): Whether to use GPU acceleration
             temperature (float): Sampling temperature for generation
+            cuda_config (dict): CUDA-specific configuration options
         """
         logging.info(f"Loading vLLM-based Qwen model from: {model_path} ...")
         
-        # Configure GPU usage
+        # Default CUDA configuration optimized for performance
+        default_cuda_config = {
+            "dtype": "bfloat16",
+            "gpu_memory_utilization": 0.90,
+            "enable_chunked_prefill": True,
+            "enable_prefix_caching": True,
+            "max_model_len": 32768,
+            "enforce_eager": False,
+            "tensor_parallel_size": 1,
+            "disable_custom_all_reduce": False
+        }
+        
+        # Merge with provided cuda_config
+        if cuda_config:
+            default_cuda_config.update(cuda_config)
+        
+        # Configure GPU usage with optimizations
         gpu_config = {}
         if use_gpu:
-            gpu_config = {
-                "dtype": "bfloat16",
-                "gpu_memory_utilization": 0.80 # This works on a 24gb card with Omniparser running as well
-            }
+            import torch
+            if torch.cuda.is_available():
+                # Log GPU information for debugging
+                gpu_name = torch.cuda.get_device_name(0)
+                gpu_memory = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                logging.info(f"Using GPU: {gpu_name} with {gpu_memory:.2f}GB memory")
+                
+                # Apply CUDA configuration
+                gpu_config = {
+                    "dtype": default_cuda_config["dtype"],
+                    "gpu_memory_utilization": default_cuda_config["gpu_memory_utilization"],
+                    "enforce_eager": default_cuda_config["enforce_eager"],
+                    "enable_chunked_prefill": default_cuda_config["enable_chunked_prefill"],
+                    "enable_prefix_caching": default_cuda_config["enable_prefix_caching"],
+                    "tensor_parallel_size": default_cuda_config["tensor_parallel_size"],
+                    "disable_custom_all_reduce": default_cuda_config["disable_custom_all_reduce"]
+                }
+                
+                # Enable Flash Attention if available and requested
+                if default_cuda_config.get("enable_flash_attention", True):
+                    # Flash Attention is automatically enabled in vLLM when available
+                    logging.info("Flash Attention will be used if available")
+                
+                # Clear CUDA cache before loading model
+                torch.cuda.empty_cache()
+                logging.info("Cleared CUDA cache before model loading")
+            else:
+                logging.warning("CUDA not available, falling back to CPU")
         
-        # Create the vLLM LLM instance
+        # Create the vLLM LLM instance with optimized settings
         self.llm = LLM(
             model=model_path,
-            max_model_len=32768,
+            max_model_len=default_cuda_config["max_model_len"],
             limit_mm_per_prompt={"image": 1},  # We only need one screenshot at a time
+            trust_remote_code=True,
             **gpu_config
         )
         
         # Create the processor for building prompts + handling images
-        self.processor = AutoProcessor.from_pretrained(model_path)
+        self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
         
         # Set default parameters
         self.temperature = temperature
@@ -65,7 +107,7 @@ class QwenVLAgent:
 	4. Include a brief reasoning explaining why you chose this action.
         """
         
-        logging.info("vLLM Qwen model loaded successfully.")
+        logging.info("vLLM Qwen model loaded successfully with CUDA optimizations")
     
     def _encode_image(self, image_path):
         """

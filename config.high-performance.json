@@ -18,7 +18,7 @@
   },
 
   "cuda_config": {
-    "gpu_memory_utilization": 0.90,
+    "gpu_memory_utilization": 0.95,
     "dtype": "bfloat16",
     "enable_flash_attention": true,
     "max_model_len": 32768,
